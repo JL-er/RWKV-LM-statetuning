@@ -74,6 +74,9 @@ if __name__ == "__main__":
     parser.add_argument("--my_exit", default=99999999, type=int)
     parser.add_argument("--my_exit_tokens", default=0, type=int)
 
+        #dataset
+    parser.add_argument("--dataload", default="get", type=str)
+
     if pl.__version__[0]=='2':
         parser.add_argument("--accelerator", default="gpu", type=str)
         parser.add_argument("--strategy", default="auto", type=str)
@@ -224,6 +227,8 @@ if __name__ == "__main__":
         rank_zero_info("\n\nNote: you are using fp16 (might overflow). Try bf16 / tf32 for stable training.\n\n")
 
     os.environ["RWKV_JIT_ON"] = "1"
+    if args.train_type == 'states':
+        os.environ["RWKV_JIT_ON"] = "0"
     if "deepspeed_stage_3" in args.strategy:
         os.environ["RWKV_JIT_ON"] = "0"
 
@@ -253,6 +258,13 @@ if __name__ == "__main__":
 
     from src.model import RWKV
     model = RWKV(args)
+    if args.train_type == 'states':
+        model.requires_grad_(False)
+        for name, module in model.named_modules():
+            for pname, param in module.named_parameters():
+                if pname.endswith('.time_state') and pname.startswith('blocks.'):
+                    print(pname)
+                    param.requires_grad = True
 
     if len(args.load_model) == 0 or args.my_pile_stage == 1:  # shall we build the initial weights?
         init_weight_name = f"{args.proj_dir}/rwkv-init.pth"
@@ -285,7 +297,7 @@ if __name__ == "__main__":
         state_dict = torch.load(state_file, map_location="cpu")
         for k in state_dict:
             load_dict[k] = state_dict[k]
-
+            
     if args.load_partial == 1:
         load_keys = load_dict.keys()
         for k in model.state_dict():

@@ -14,6 +14,7 @@ from pytorch_lightning.strategies import DeepSpeedStrategy
 if importlib.util.find_spec('deepspeed'):
     import deepspeed
     from deepspeed.ops.adam import DeepSpeedCPUAdam, FusedAdam
+from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
 # from deepspeed.runtime.fp16.onebit.zoadam import ZeroOneAdam
 
@@ -922,11 +923,11 @@ class RWKV(pl.LightningModule):
         lr_3x = set()
         for n, p in self.named_parameters():
 
-            # if not p.requires_grad:
-            #     continue
-            if args.train_type == 'states':
-                if 'time_sta' not in n:
-                    continue
+            if not p.requires_grad:
+                continue
+            # if args.train_type == 'states':
+            #     if 'time_state' not in n:
+            #         continue
 
             if (("_w1" in n) or ("_w2" in n)) and (args.layerwise_lr > 0):
                 lr_1x.add(n)
@@ -1015,13 +1016,19 @@ class RWKV(pl.LightningModule):
         if args.tiny_att_dim > 0:
             for block in self.blocks:
                 if args.grad_cp == 1:
-                    x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
+                    if args.train_type == 'states':
+                        x = torch_checkpoint(block, x, x_emb, use_reentrant=False)
+                    else:
+                        x = deepspeed.checkpointing.checkpoint(block, x, x_emb)
                 else:
                     x = block(x, x_emb)
         else:
             for block in self.blocks:
                 if args.grad_cp == 1:
-                    x = deepspeed.checkpointing.checkpoint(block, x)
+                    if args.train_type == 'states':
+                        x = torch_checkpoint(block, x, x_emb ,use_reentrant=False)
+                    else:
+                        x = deepspeed.checkpointing.checkpoint(block, x)
                 else:
                     x = block(x)
 
